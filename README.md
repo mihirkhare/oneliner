@@ -1,0 +1,24 @@
+**Oneliner - Translate any Python 3 program to a single line expression, no statements at all**
+*(ideally, not yet sure of any limits)*
+
+Inspired by my single line submission to 15-451's Homework 7.5 programming assignment in Fall 2023.
+
+There are 2 main planned translation options: one that uses a list to act as the variable store with commas for program flow, and another that uses lambdas for variable binding with continuations for program flow. I believe these should both have equivalent functionality, but its possible some loosening may be required. A third (trivial) option will turn the input program into a string and use `exec` - this is really just available for completeness.
+
+**Planned Translations:**
+- Variables
+- Scoping
+- Expressions
+- Conditionals
+- Loops
+- Functions (including recursion)
+- Imports
+- Comments
+- Classes
+- Raising exceptions
+
+**Not-sure-if-possible Translations:**
+- Multi-file programs
+- Handling exceptions (`try`-`except` blocks)
+- `with` statements
+- Likely more (to be discovered as I go on)
