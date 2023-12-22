@@ -13,7 +13,6 @@ There are 2 main planned translation options: one that uses a list to act as the
 - Loops
 - Functions (including recursion)
 - Imports
-- Comments
 - Classes
 - Raising exceptions
 
