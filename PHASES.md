@@ -1,6 +1,6 @@
 **Implementation Phases:**
 1. Straight-line code
-    - Variable declarations
-    - Non-scoping expressions
-        - NO lambdas
-        - NO list comprehensions
+    - Variable assignments
+        - List and tuple patterns
+        - NO complex assignments (list indexing, dict indexing, object attributes, etc)
+    - Expressions

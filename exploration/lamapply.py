@@ -1,3 +1,3 @@
 z = (4, 5)
 
-(lambda x, y: print(x, y))(z)
+(lambda x, y: print(x, y))(z + 3,)
