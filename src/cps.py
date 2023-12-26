@@ -2,10 +2,24 @@ from ast import *
 import sys
 
 def read_file() -> str:
-    with open(sys.argv[1], 'r') as f:
-        file = ''
-        for line in f.readlines(): file += line
-    return file
+    with open(sys.argv[1], 'r') as f: return f.read()
+
+temp_count = 0
+def get_new_temp() -> str:
+    global temp_count
+    temp_count += 1
+    return str(temp_count)
+
+def read_temp(temp: str) -> expr:
+    return Subscript(
+        value = Call(
+            func = Name(id = 'globals', ctx = Load()),
+            args = [],
+            keywords = []
+        ),
+        slice = Constant(value = temp),
+        ctx = Load()
+    )
 
 def transform_args(elts : list[Name]) -> list[arg]:
     match elts:
@@ -13,8 +27,61 @@ def transform_args(elts : list[Name]) -> list[arg]:
             return []
         case _:
             return [arg(arg = elts[0].id)] + transform_args(elts[1:])
+        
+def set_global_variable(id: str, value: expr) -> expr:
+    return Call(
+        func = Attribute(
+            value = Call(
+                func = Name(id = 'globals', ctx = Load()),
+                args = [],
+                keywords = []
+            ),
+            attr = '__setitem__',
+            ctx = Load()
+        ),
+        args = [Constant(value = id), value],
+        keywords = []
+    )
 
-def transform_stmt(stmt : stmt, rest : list[stmt], acc: list[expr]) -> list[expr]:
+def set_local_variable(id: str, value: expr) -> expr:
+    return Call(
+        func = Attribute(
+            value = Call(
+                func = Name(id = 'locals', ctx = Load()),
+                args = [],
+                keywords = []
+            ),
+            attr = '__setitem__',
+            ctx = Load()
+        ),
+        args = [Constant(value = id), value],
+        keywords = []
+    )
+
+def transform_assign(target: expr, value: expr, acc: list[expr]):
+    match target:
+        case Name(id = id):
+            acc.append(set_local_variable(id, value))
+
+        case Tuple(elts = elts) | List(elts = elts):
+            if len(elts) > 1:
+                temp = get_new_temp()
+                acc.append(set_local_variable(temp, value))
+                value = read_temp(temp)
+
+            for i, elt in enumerate(elts):
+                transform_assign(elt, Subscript(value = value, slice = Constant(value = i), ctx = Load()), acc)
+
+def transform_assign_list(targets: list[expr], value: expr, acc: list[expr]):
+    if len(targets) > 1:
+        temp = get_new_temp()
+        acc.append(set_local_variable(temp, value))
+        value = read_temp(temp)
+
+    for target in targets:
+        transform_assign(target, value, acc)
+
+def transform_stmt(stmt: stmt, rest: list[stmt], acc: list[expr]) -> list[expr]:
     match stmt:
         # Transforming expression statement (already one line)
         case Expr(value = value):
@@ -23,8 +90,8 @@ def transform_stmt(stmt : stmt, rest : list[stmt], acc: list[expr]) -> list[expr
             return transform_stmts(rest, acc)
 
         # Single variable target assignment
-        case Assign(targets = [Name(id = id)], value = value):
-            acc.append(NamedExpr(target = Name(id = id), value = value))
+        case Assign(targets = targets, value = value):
+            transform_assign_list(targets, value, acc)
             return transform_stmts(rest, acc)
         
         # TODO: add support for assigning to non-variable targets
@@ -32,28 +99,7 @@ def transform_stmt(stmt : stmt, rest : list[stmt], acc: list[expr]) -> list[expr
         case Assign():
             raise NotImplementedError('Only single variable targets implemented for assignment')
 
-        # case Assign(targets = [Name(id = id)], value = value):
-        #     body = transform_stmts(rest)
-        #     if len(body) == 1: body = body[0]
-        #     else: body = Tuple(elts = body, ctx = Load())
-            
-        #     args = arguments(args = [arg(arg = id)], posonlyargs = [], kwonlyargs = [], kw_defaults = [], defaults = [])
-        #     lam = Lambda(args = args, body = body)
-        #     return [Call(func = lam, args = [value], keywords = [])]
-
-        # Tuple/List variable target assignment
-        # case Assign(targets = [Tuple(elts = elts)], value = value) | Assign(targets = [List(elts = elts)], value = value):
-        #     body = transform_stmts(rest)
-        #     if len(body) == 1: body = body[0]
-        #     else: body = Tuple(elts = body, ctx = Load())
-
-        #     args = arguments(args = transform_args(elts), posonlyargs = [], kwonlyargs = [], kw_defaults = [], defaults = [])
-        #     lam = Lambda(args = args, body = body)
-        #     # Unpack the arguments to pass into the function
-        #     return [Call(func = lam, args = [Starred(value = value, ctx = Load())], keywords = [])]
-
-
-def transform_stmts(stmts : list[stmt], acc: list[expr]) -> list[expr]:
+def transform_stmts(stmts: list[stmt], acc: list[expr]) -> list[expr]:
     match stmts:
         case []:
             return acc
