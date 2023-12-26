@@ -58,6 +58,8 @@ def set_local_variable(id: str, value: expr) -> expr:
         keywords = []
     )
 
+# TODO: add support for assigning to non-variable targets
+    # non-variables can also appear in Tuple/List targets, handle using temp variables then the index/field attr update functions
 def transform_assign(target: expr, value: expr, acc: list[expr]):
     match target:
         case Name(id = id):
@@ -89,15 +91,61 @@ def transform_stmt(stmt: stmt, rest: list[stmt], acc: list[expr]) -> list[expr]:
             acc.append(value)
             return transform_stmts(rest, acc)
 
-        # Single variable target assignment
+        # Transforming any assignment statement
         case Assign(targets = targets, value = value):
             transform_assign_list(targets, value, acc)
             return transform_stmts(rest, acc)
         
-        # TODO: add support for assigning to non-variable targets
-            # non-variables can also appear in Tuple/List targets, handle using temp variables then the index/field attr update functions
-        case Assign():
-            raise NotImplementedError('Only single variable targets implemented for assignment')
+        # Transforming basic imports with optional alias
+        case Import(names = names):
+            for name in names:
+                keywords = [
+                    keyword(
+                        arg = 'fromlist',
+                        value = List(elts = [Constant(value = None)], ctx = Load())
+                    ),
+                    keyword(
+                        arg = 'globals',
+                        value = Call(func = Name(id = 'globals', ctx = Load()), args = [], keywords = [])
+                    )
+                ] if name.asname else [keyword(
+                    arg = 'globals',
+                    value = Call(func = Name(id = 'globals', ctx = Load()), args = [], keywords = [])
+                )]
+                bind = name.asname if name.asname else name.name
+                module = Call(func = Name(id = '__import__', ctx = Load()), args = [Constant(value = name.name)], keywords = keywords)
+                acc.append(set_local_variable(bind, module))
+            
+            return transform_stmts(rest, acc)
+        
+        # TODO: this can be made more efficient (put all names into fromlist, then separately access fields w temp)
+        case ImportFrom(module = module, names = names, level = level):
+            module_name = module if module else ''
+            for name in names:
+                keywords = [
+                    keyword(
+                        arg = 'fromlist',
+                        value = List(elts = [Constant(value = name.name)], ctx = Load())
+                    ),
+                    keyword(
+                        arg = 'globals',
+                        value = Call(func = Name(id = 'globals', ctx = Load()), args = [], keywords = [])
+                    ),
+                    keyword(
+                        arg = 'level',
+                        value = Constant(value = level)
+                    )
+                ]
+                bind = name.asname if name.asname else name.name
+                module = Attribute(
+                    value = Call(func = Name(id = '__import__', ctx = Load()), args = [Constant(value = module_name)], keywords = keywords),
+                    attr = name.name,
+                    ctx = Load()
+                )
+                
+                acc.append(set_local_variable(bind, module))
+            
+            return transform_stmts(rest, acc)
 
 def transform_stmts(stmts: list[stmt], acc: list[expr]) -> list[expr]:
     match stmts:
