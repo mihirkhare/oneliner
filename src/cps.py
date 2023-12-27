@@ -79,6 +79,56 @@ def transform_assign_list(targets: list[expr], value: expr, acc: list[expr]):
     for target in targets:
         transform_assign(target, value, acc)
 
+def transform_import(names: list[alias], acc: list[expr]):
+    for name in names:
+        keywords = [
+            keyword(
+                arg = 'fromlist',
+                value = List(elts = [Constant(value = None)], ctx = Load())
+            ),
+            keyword(
+                arg = 'globals',
+                value = Call(func = Name(id = 'globals', ctx = Load()), args = [], keywords = [])
+            )
+        ] if name.asname else [keyword(
+            arg = 'globals',
+            value = Call(func = Name(id = 'globals', ctx = Load()), args = [], keywords = [])
+        )]
+        bind = name.asname if name.asname else name.name
+        module = Call(func = Name(id = '__import__', ctx = Load()), args = [Constant(value = name.name)], keywords = keywords)
+
+        acc.append(set_local_variable(bind, module))
+
+def transform_import_from(module: str | None, names: list[alias], level: int, acc: list[expr]):
+    module_name = module if module else ''
+    fromlist = [Constant(value = name.name) for name in names]
+    keywords = [
+        keyword(
+            arg = 'fromlist',
+            value = List(elts = fromlist, ctx = Load())
+        ),
+        keyword(
+            arg = 'globals',
+            value = Call(func = Name(id = 'globals', ctx = Load()), args = [], keywords = [])
+        ),
+        keyword(
+            arg = 'level',
+            value = Constant(value = level)
+        )
+    ]
+    module = Call(
+        func = Name(id = '__import__', ctx = Load()),
+        args = [Constant(value = module_name)],
+        keywords = keywords
+    )
+
+    temp = get_new_temp()
+    acc.append(set_local_variable(temp, module))
+    for name in names:
+        bind = name.asname if name.asname else name.name
+        attr = Attribute(value = read_temp(temp), attr = name.name, ctx = Load())
+        acc.append(set_local_variable(bind, attr))
+
 def transform_stmt(stmt: stmt, rest: list[stmt], acc: list[expr]) -> list[expr]:
     match stmt:
         # Transforming expression statement (already one line)
@@ -94,59 +144,13 @@ def transform_stmt(stmt: stmt, rest: list[stmt], acc: list[expr]) -> list[expr]:
         
         # Transforming basic imports with optional aliases
         case Import(names = names):
-            for name in names:
-                keywords = [
-                    keyword(
-                        arg = 'fromlist',
-                        value = List(elts = [Constant(value = None)], ctx = Load())
-                    ),
-                    keyword(
-                        arg = 'globals',
-                        value = Call(func = Name(id = 'globals', ctx = Load()), args = [], keywords = [])
-                    )
-                ] if name.asname else [keyword(
-                    arg = 'globals',
-                    value = Call(func = Name(id = 'globals', ctx = Load()), args = [], keywords = [])
-                )]
-                bind = name.asname if name.asname else name.name
-                module = Call(func = Name(id = '__import__', ctx = Load()), args = [Constant(value = name.name)], keywords = keywords)
-
-                acc.append(set_local_variable(bind, module))
-            
+            transform_import(names, acc)
             return transform_stmts(rest, acc)
         
         # Transforming from imports with optional aliases
         # TODO: implement *; this can happen after iteration is implemented
         case ImportFrom(module = module, names = names, level = level):
-            module_name = module if module else ''
-            fromlist = [Constant(value = name.name) for name in names]
-            keywords = [
-                keyword(
-                    arg = 'fromlist',
-                    value = List(elts = fromlist, ctx = Load())
-                ),
-                keyword(
-                    arg = 'globals',
-                    value = Call(func = Name(id = 'globals', ctx = Load()), args = [], keywords = [])
-                ),
-                keyword(
-                    arg = 'level',
-                    value = Constant(value = level)
-                )
-            ]
-            module = Call(
-                func = Name(id = '__import__', ctx = Load()),
-                args = [Constant(value = module_name)],
-                keywords = keywords
-            )
-
-            temp = get_new_temp()
-            acc.append(set_local_variable(temp, module))
-            for name in names:
-                bind = name.asname if name.asname else name.name
-                attr = Attribute(value = read_temp(temp), attr = name.name, ctx = Load())
-                acc.append(set_local_variable(bind, attr))
-            
+            transform_import_from(module, names, level, acc)
             return transform_stmts(rest, acc)
 
 def transform_stmts(stmts: list[stmt], acc: list[expr]) -> list[expr]:
