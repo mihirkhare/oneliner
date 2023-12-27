@@ -1,0 +1,1 @@
+# None if 4 == 2 else raise AssertionError

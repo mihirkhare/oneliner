@@ -1,0 +1,1 @@
+print(a if 1 > 0 else (a := 3) - 1)
