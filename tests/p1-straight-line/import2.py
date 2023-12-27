@@ -1,3 +1,3 @@
-from torch.nn import Module, Parameter, Flatten
+from torch.nn import Module as m, Parameter, Flatten as f
 
-print(Module, Parameter, Flatten)
+print(m, Parameter, f)
