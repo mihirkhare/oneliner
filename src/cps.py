@@ -129,39 +129,36 @@ def transform_import_from(module: str | None, names: list[alias], level: int, ac
         attr = Attribute(value = read_temp(temp), attr = name.name, ctx = Load())
         acc.append(set_local_variable(bind, attr))
 
-def transform_stmt(stmt: stmt, rest: list[stmt], acc: list[expr]) -> list[expr]:
-    match stmt:
+def transform_stmt(stmts: list[stmt], pos: int, acc: list[expr]) -> list[expr]:
+    match stmts[pos]:
         # Transforming expression statement (already one line)
         case Expr(value = value):
             # TODO: if value is a tuple, can unpack to avoid unneeded nesting
             acc.append(value)
-            return transform_stmts(rest, acc)
+            return transform_stmts(stmts, pos + 1, acc)
 
         # Transforming any assignment statement
         case Assign(targets = targets, value = value):
             transform_assign_list(targets, value, acc)
-            return transform_stmts(rest, acc)
+            return transform_stmts(stmts, pos + 1, acc)
         
         # Transforming basic imports with optional aliases
         case Import(names = names):
             transform_import(names, acc)
-            return transform_stmts(rest, acc)
+            return transform_stmts(stmts, pos + 1, acc)
         
         # Transforming from imports with optional aliases
         # TODO: implement *; this can happen after iteration is implemented
         case ImportFrom(module = module, names = names, level = level):
             transform_import_from(module, names, level, acc)
-            return transform_stmts(rest, acc)
+            return transform_stmts(stmts, pos + 1, acc)
 
-def transform_stmts(stmts: list[stmt], acc: list[expr]) -> list[expr]:
-    match stmts:
-        case []:
-            return acc
-        case _:
-            return transform_stmt(stmts[0], stmts[1:], acc)
+def transform_stmts(stmts: list[stmt], start: int, acc: list[expr]) -> list[expr]:
+    if start == len(stmts): return acc
+    return transform_stmt(stmts, start, acc)
 
 def transform_module(module: Module) -> AST:
-    body = transform_stmts(module.body, [])
+    body = transform_stmts(module.body, 0, [])
     num_exprs = len(body)
     if num_exprs > 1:
         body_p = [Expr(value = Tuple(elts = body, ctx = Load()))]
