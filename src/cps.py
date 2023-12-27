@@ -22,12 +22,11 @@ def read_temp(temp: str) -> expr:
     )
 
 def transform_args(elts : list[Name]) -> list[arg]:
-    match elts:
-        case []:
-            return []
-        case _:
-            return [arg(arg = elts[0].id)] + transform_args(elts[1:])
-        
+    res = []
+    for elt in elts:
+        res.append(arg(arg = elt.id))
+    return res
+
 def set_global_variable(id: str, value: expr) -> expr:
     return Call(
         func = Attribute(
@@ -119,6 +118,7 @@ def transform_stmt(stmt: stmt, rest: list[stmt], acc: list[expr]) -> list[expr]:
             return transform_stmts(rest, acc)
         
         # TODO: this can be made more efficient (put all names into fromlist, then separately access fields w temp)
+        # TODO: implement *; this can happen after iteration is implemented
         case ImportFrom(module = module, names = names, level = level):
             module_name = module if module else ''
             for name in names:
