@@ -54,6 +54,17 @@ def set_local_variable(id: str, value: expr) -> expr:
         keywords = []
     )
 
+def wrap_exprs(exprs: list[expr]) -> expr:
+    num_exprs = len(exprs)
+    if num_exprs > 1:
+        res = Tuple(elts = exprs, ctx = Load())
+    elif num_exprs == 1:
+        res = exprs[0]
+    else:
+        res = Tuple(elts = [], ctx = Load())
+
+    return res
+
 # TODO: add support for assigning to non-variable targets
     # non-variables can also appear in Tuple/List targets, handle using temp variables then the index/field attr update functions
 def transform_assign(target: expr, value: expr, acc: list[expr]):
@@ -129,6 +140,13 @@ def transform_import_from(module: str | None, names: list[alias], level: int, ac
         attr = Attribute(value = read_temp(temp), attr = name.name, ctx = Load())
         acc.append(set_local_variable(bind, attr))
 
+def transform_if(test: expr, body: list[stmt], orelse: list[stmt], acc: list[expr]):
+    acc.append(IfExp(
+        test = test,
+        body = wrap_exprs(transform_stmts(body, 0, [])),
+        orelse = wrap_exprs(transform_stmts(orelse, 0, []))
+    ))
+
 def transform_stmt(stmts: list[stmt], pos: int, acc: list[expr]) -> list[expr]:
     match stmts[pos]:
         # Transforming expression statement (already one line)
@@ -152,22 +170,19 @@ def transform_stmt(stmts: list[stmt], pos: int, acc: list[expr]) -> list[expr]:
         case ImportFrom(module = module, names = names, level = level):
             transform_import_from(module, names, level, acc)
             return transform_stmts(stmts, pos + 1, acc)
+        
+        # Transforming if-elif-else statements
+        case If(test = test, body = body, orelse = orelse):
+            transform_if(test, body, orelse, acc)
+            return transform_stmts(stmts, pos + 1, acc)
 
 def transform_stmts(stmts: list[stmt], start: int, acc: list[expr]) -> list[expr]:
     if start == len(stmts): return acc
     return transform_stmt(stmts, start, acc)
 
 def transform_module(module: Module) -> AST:
-    body = transform_stmts(module.body, 0, [])
-    num_exprs = len(body)
-    if num_exprs > 1:
-        body_p = [Expr(value = Tuple(elts = body, ctx = Load()))]
-    elif num_exprs == 1:
-        body_p = [Expr(value = body[0])]
-    else:
-        body_p = []
-
-    return Module(body = body_p, type_ignores = module.type_ignores)
+    body = wrap_exprs(transform_stmts(module.body, 0, []))
+    return Module(body = [Expr(value = body)], type_ignores = module.type_ignores)
 
 if __name__ == '__main__':
     file = read_file()
