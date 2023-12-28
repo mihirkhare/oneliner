@@ -147,6 +147,12 @@ def transform_if(test: expr, body: list[stmt], orelse: list[stmt], acc: list[exp
         orelse = wrap_exprs(transform_stmts(orelse, 0, []))
     ))
 
+def transform_for(target: expr, iter: expr, body: list[stmt], orelse: list[stmt], acc: list[expr]):
+    pass
+
+def transform_while(test: expr, body: list[stmt], orelse: list[stmt], acc: list[expr]):
+    pass
+
 def transform_stmt(stmts: list[stmt], pos: int, acc: list[expr]) -> list[expr]:
     match stmts[pos]:
         # Transforming expression statement (already one line)
@@ -174,6 +180,14 @@ def transform_stmt(stmts: list[stmt], pos: int, acc: list[expr]) -> list[expr]:
         # Transforming if-elif-else statements
         case If(test = test, body = body, orelse = orelse):
             transform_if(test, body, orelse, acc)
+            return transform_stmts(stmts, pos + 1, acc)
+        
+        case For(target = target, iter = iter, body = body, orelse = orelse):
+            transform_for(target, iter, body, orelse, acc)
+            return transform_stmts(stmts, pos + 1, acc)
+
+        case While(test = test, body = body, orelse = orelse):
+            transform_while(test, body, orelse, acc)
             return transform_stmts(stmts, pos + 1, acc)
 
 def transform_stmts(stmts: list[stmt], start: int, acc: list[expr]) -> list[expr]:
