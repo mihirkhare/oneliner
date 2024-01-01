@@ -81,6 +81,42 @@ def wrap_exprs(exprs: list[expr]) -> expr:
 
     return res
 
+while_temp = '-1'
+for_temp = '-2'
+def add_loops(acc: list[expr]):
+    base = Tuple(elts = [Name(id = 'object', ctx = Load())], ctx = Load())
+    attr_names = [Constant(value = 'stop'), Constant(value = '__init__'), Constant(value = '__iter__'), Constant(value = '__next__')]
+    stop = Name(id = 'StopIteration')
+    iter_body = parse('lambda self: self').body[0].value
+
+    # while
+    while_init_body = parse('lambda self, guard, indicator, scope: (self.__setattr__("guard", guard), self.__setattr__("indicator", indicator), self.__setattr__("scope", scope), None)[-1]').body[0].value
+    while_next_body = parse('lambda self: ([] for [] in []).throw(self.stop) if self.scope[self.indicator] or not self.guard(self.scope) else self.scope').body[0].value
+    while_dict = Dict(
+        keys = attr_names,
+        values = [stop, while_init_body, iter_body, while_next_body]
+    )
+    while_type = Call(
+        func = Name(id = 'type'),
+        args = [Constant(value = while_temp), base, while_dict],
+        keywords = []
+    )
+    acc.append(while_type)
+
+    # for
+    for_init_body = parse('lambda self, iterator, indicator, scope: (self.__setattr__("iterator", iterator.__iter__()), self.__setattr__("indicator", indicator), self.__setattr__("scope", scope), None)[-1]').body[0].value
+    for_next_body = parse('lambda self: ([] for [] in []).throw(self.stop) if self.scope[self.indicator] else (self.scope, self.iterator.__next__())').body[0].value
+    for_dict = Dict(
+        keys = attr_names,
+        values = [stop, for_init_body, iter_body, for_next_body]
+    )
+    for_type = Call(
+        func = Name(id = 'type'),
+        args = [Constant(value = for_temp), base, for_dict],
+        keywords = []
+    )
+    acc.append(for_type)
+
 def transform_args(elts : list[Name]) -> list[arg]:
     return [arg(arg = elt.id) for elt in elts]
 
