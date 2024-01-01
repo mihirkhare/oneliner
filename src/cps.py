@@ -12,56 +12,60 @@ def get_new_temp() -> str:
     temp_count += 1
     return str(temp_count)
 
-def set_global_variable(id: str, value: expr) -> expr:
+def get_attribute(obj: expr, attr: str) -> expr:
+    return Attribute(value = obj, attr = attr, ctx = Load())
+
+def set_attribute(obj: expr, attr: str, value: expr) -> expr:
     return Call(
-        func = Attribute(
-            value = Call(
-                func = Name(id = 'globals', ctx = Load()),
-                args = [],
-                keywords = []
-            ),
-            attr = '__setitem__',
-            ctx = Load()
-        ),
-        args = [Constant(value = id), value],
+        func = get_attribute(obj, '__setattr__'),
+        args = [Constant(value = attr), value],
         keywords = []
     )
+
+def get_item(obj: expr, item: None | str | bytes | bool | int | float | complex) -> expr:
+    return Subscript(value = obj, slice = Constant(value = item), ctx = Load())
+
+def set_item(obj: expr, item: None | str | bytes | bool | int | float | complex, value: expr) -> expr:
+    return Call(
+        func = get_attribute(obj, '__setitem__'),
+        args = [Constant(value = item), value],
+        keywords = []
+    )
+
+def get_globals() -> expr:
+    return Call(
+        func = Name(id = 'globals', ctx = Load()),
+        args = [],
+        keywords = []
+    )
+
+def get_locals() -> expr:
+    return Call(
+        func = Name(id = 'locals', ctx = Load()),
+        args = [],
+        keywords = []
+    )
+
+def set_global_variable(id: str, value: expr) -> expr:
+    return set_item(get_globals(), id, value)
 
 def get_global_variable(id: str) -> expr:
-    return Subscript(
-        value = Call(
-            func = Name(id = 'globals', ctx = Load()),
-            args = [],
-            keywords = []
-        ),
-        slice = Constant(value = id),
-        ctx = Load()
-    )
+    return get_item(get_globals(), id)
 
-def set_local_variable(id: str, value: expr, scope: str) -> expr:
-    return Call(
-        func = Attribute(
-            value = get_global_variable(scope),
-            attr = '__setitem__',
-            ctx = Load()
-        ),
-        args = [Constant(value = id), value],
-        keywords = []
-    )
+def get_scope(scope: str) -> expr:
+    return get_global_variable(scope)
 
-def get_local_variable(id: str, scope: str) -> expr:
-    return Subscript(
-        value = get_global_variable(scope),
-        slice = Constant(value = id),
-        ctx = Load()
-    )
+def set_variable(id: str, value: expr, scope: str) -> expr:
+    return set_item(get_scope(scope), id, value)
+
+def get_variable(id: str, scope: str) -> expr:
+    return get_item(get_scope(scope), id)
 
 # TODO: make scopes be a list during runtime as well for pushing/popping
 def add_scope(scopes: list[str], acc: list[expr]):
     scope = get_new_temp()
-    # print(f'print(f\'New scope: {scope}\')')
     scopes.append(scope)
-    acc.append(set_global_variable(scope, Call(func = Name(id = 'locals', ctx = Load()), args = [], keywords = [])))
+    acc.append(set_global_variable(scope, get_locals()))
 
 def rem_scope(scopes: list[str], acc: list[expr]):
     scopes.pop()
@@ -85,22 +89,22 @@ def transform_args(elts : list[Name]) -> list[arg]:
 def transform_assign(target: expr, value: expr, scopes: list[str], acc: list[expr]):
     match target:
         case Name(id = id):
-            acc.append(set_local_variable(id, value, scopes[-1]))
+            acc.append(set_variable(id, value, scopes[-1]))
 
         case Tuple(elts = elts) | List(elts = elts):
             if len(elts) > 1:
                 temp = get_new_temp()
-                acc.append(set_local_variable(temp, value, scopes[-1]))
-                value = get_global_variable(temp)
+                acc.append(set_variable(temp, value, scopes[-1]))
+                value = get_variable(temp)
 
             for i, elt in enumerate(elts):
-                transform_assign(elt, Subscript(value = value, slice = Constant(value = i), ctx = Load()), scopes, acc)
+                transform_assign(elt, get_item(value, i), scopes, acc)
 
 def transform_assign_list(targets: list[expr], value: expr, scopes: list[str], acc: list[expr]):
     if len(targets) > 1:
         temp = get_new_temp()
-        acc.append(set_local_variable(temp, value, scopes[-1]))
-        value = get_global_variable(temp)
+        acc.append(set_variable(temp, value, scopes[-1]))
+        value = get_variable(temp)
 
     for target in targets:
         transform_assign(target, value, scopes, acc)
@@ -114,16 +118,16 @@ def transform_import(names: list[alias], scopes: list[str], acc: list[expr]):
             ),
             keyword(
                 arg = 'globals',
-                value = Call(func = Name(id = 'globals', ctx = Load()), args = [], keywords = [])
+                value = get_globals()
             )
         ] if name.asname else [keyword(
             arg = 'globals',
-            value = Call(func = Name(id = 'globals', ctx = Load()), args = [], keywords = [])
+            value = get_globals()
         )]
         bind = name.asname if name.asname else name.name
         module = Call(func = Name(id = '__import__', ctx = Load()), args = [Constant(value = name.name)], keywords = keywords)
 
-        acc.append(set_local_variable(bind, module, scopes[-1]))
+        acc.append(set_variable(bind, module, scopes[-1]))
 
 def transform_import_from(module: str | None, names: list[alias], level: int, scopes: list[str], acc: list[expr]):
     module_name = module if module else ''
@@ -135,7 +139,7 @@ def transform_import_from(module: str | None, names: list[alias], level: int, sc
         ),
         keyword(
             arg = 'globals',
-            value = Call(func = Name(id = 'globals', ctx = Load()), args = [], keywords = [])
+            value = get_globals()
         ),
         keyword(
             arg = 'level',
@@ -149,11 +153,11 @@ def transform_import_from(module: str | None, names: list[alias], level: int, sc
     )
 
     temp = get_new_temp()
-    acc.append(set_local_variable(temp, module, scopes[-1]))
+    acc.append(set_variable(temp, module, scopes[-1]))
     for name in names:
         bind = name.asname if name.asname else name.name
-        attr = Attribute(value = get_global_variable(temp), attr = name.name, ctx = Load())
-        acc.append(set_local_variable(bind, attr, scopes[-1]))
+        attr = get_attribute(get_variable(temp, scopes[-1]), name.name)
+        acc.append(set_variable(bind, attr, scopes[-1]))
 
 def transform_if(test: expr, body: list[stmt], orelse: list[stmt], scopes: list[str], acc: list[expr]):
     acc.append(IfExp(
@@ -213,6 +217,7 @@ def transform_module(module: Module) -> AST:
     acc = []
     scopes = []
     add_scope(scopes, acc)
+    add_loops(acc)
     body = wrap_exprs(transform_stmts(module.body, 0, scopes, acc))
     rem_scope(scopes, acc)
     return Module(body = [Expr(value = body)], type_ignores = module.type_ignores)
@@ -229,3 +234,4 @@ if __name__ == '__main__':
     print('print("New ------------")')
     print(unparse(transform_module(ast)))
     print('print()')
+    print()
