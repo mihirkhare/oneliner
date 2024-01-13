@@ -117,6 +117,52 @@ def add_loops(acc: list[expr]):
     )
     acc.append(for_type)
 
+# def transform_expr(expr: expr | None, scopes: list[str]) -> expr | None:
+#     # Dict keys may be none in the case of a dictionary unpacking inside a literal
+#     if expr == None: return None
+
+#     match expr:
+#         case BoolOp(op = op, values = values):
+#             return BoolOp(op = op, values = transform_exprs(values, scopes))
+        
+#         case BinOp(left = left, op = op, right = right):
+#             return BinOp(left = transform_expr(left, scopes), op = op, right = transform_expr(right, scopes))
+        
+#         case UnaryOp(op = op, operand = operand):
+#             return UnaryOp(op = op, operand = transform_expr(operand, scopes))
+        
+#         case Lambda():
+#             return expr
+        
+#         case IfExp(test = test, body = body, orelse = orelse):
+#             return IfExp(test = transform_expr(test, scopes), body = transform_expr(body, scopes), orelse = transform_expr(orelse, scopes))
+        
+#         case Dict(keys = keys, values = values):
+#             return Dict(keys = transform_exprs(keys, scopes), values = transform_exprs(values, scopes))
+        
+#         case Set(elts = elts):
+#             return Set(elts = transform_exprs(elts, scopes))
+        
+#         case ListComp(elt = elt, generators = generators):
+#             raise NotImplementedError('Not Yet Implemented')
+        
+#         case DictComp(key = key, value = value, generators = generators):
+#             raise NotImplementedError('Not Yet Implemented')
+        
+#         case GeneratorExp(elt = elt, generators = generators):
+#             raise NotImplementedError('Not Yet Implemented')
+        
+#         case Await() | Yield() | YieldFrom():
+#             raise NotImplementedError('Not Yet Implemented')
+        
+#         case Compare(left = left, ops = ops, comparators = comparators):
+#             return Compare(left = transform_expr(left, scopes), ops = ops, comparators = transform_exprs(comparators, scopes))
+        
+#         case Call(func = func, )
+
+# def transform_exprs(exprs: list[expr], scopes: list[str]) -> list[expr]:
+#     return [transform_expr(expr, scopes) for expr in exprs]
+
 def transform_args(elts : list[Name]) -> list[arg]:
     return [arg(arg = elt.id) for elt in elts]
 
@@ -206,6 +252,7 @@ def transform_for(target: expr, iter: expr, body: list[stmt], orelse: list[stmt]
     pass
 
 def transform_while(test: expr, body: list[stmt], orelse: list[stmt], scopes: list[str], acc: list[expr]):
+
     pass
 
 def transform_stmt(stmts: list[stmt], pos: int, scopes: list[str], acc: list[expr]) -> list[expr]:
@@ -244,6 +291,9 @@ def transform_stmt(stmts: list[stmt], pos: int, scopes: list[str], acc: list[exp
         case While(test = test, body = body, orelse = orelse):
             transform_while(test, body, orelse, scopes, acc)
             return transform_stmts(stmts, pos + 1, scopes, acc)
+        
+        # case Break():
+        #     acc.append(set_variable(kwargs['break'], Constant(value = True), scopes[-1]))
 
 def transform_stmts(stmts: list[stmt], start: int, scopes: list[str], acc: list[expr]) -> list[expr]:
     if start == len(stmts): return acc
