@@ -1,121 +1,330 @@
+# variables: dict[int, set[str]] = {1: set({**globals()}.keys())}  # initializing to names defined at module start
+# scopes: list[int] = []
+global_vars: set[str] = set({**globals()}.keys())
+
 from ast import *
 import sys
 
 def read_file() -> str:
     with open(sys.argv[1], 'r') as f: return f.read()
 
-# TODO: to avoid having a crazy amount of temps, delete temps when not needed anymore
-    # potentially use a list variable as a stack
-temp_count = 0
-def get_new_temp() -> str:
-    global temp_count
-    temp_count += 1
-    return str(temp_count)
+def get_expr_defs(expr: expr, in_assign: bool, acc: set[str]):
+    match expr:
+        case BoolOp(values = values):
+            get_exprs_defs(values, False, acc)
+        
+        case BinOp(left = left, right = right):
+            get_expr_defs(left, False, acc)
+            get_expr_defs(right, False, acc)
 
-def get_attribute(obj: expr, attr: str) -> expr:
-    return Attribute(value = obj, attr = attr, ctx = Load())
+        case UnaryOp(operand = operand):
+            get_expr_defs(operand, False, acc)
+                
+        case Lambda():
+            return
+                
+        case IfExp(test = test, body = body, orelse = orelse):
+            get_expr_defs(test, False, acc)
+            get_expr_defs(body, False, acc)
+            get_expr_defs(orelse, False, acc)
+                
+        case Dict(keys = keys, values = values):
+            for key in keys:
+                if key != None: get_expr_defs(key, False, acc)
+            for value in values: get_expr_defs(value, False, acc)
+                
+        case Set(elts = elts):
+            for elt in elts: get_expr_defs(elt, False, acc)
+                
+        case ListComp(elt = elt, generators = generators):
+            get_expr_defs(elt, False, acc)
+            for generator in generators: get_exprs_defs(generator.ifs, False, acc)
+        
+        case SetComp(elt = elt, generators = generators):
+            get_expr_defs(elt, False, acc)
+            for generator in generators: get_exprs_defs(generator.ifs, False, acc)
+                
+        case DictComp(key = key, value = value, generators = generators):
+            get_expr_defs(key, False, acc)
+            get_expr_defs(value, False, acc)
+            for generator in generators: get_exprs_defs(generator.ifs, False, acc)
+                
+        case GeneratorExp(elt = elt, generators = generators):
+            get_expr_defs(elt, False, acc)
+            for generator in generators: get_exprs_defs(generator.ifs, False, acc)
 
-def set_attribute(obj: expr, attr: str, value: expr) -> expr:
-    return Call(
-        func = get_attribute(obj, '__setattr__'),
-        args = [Constant(value = attr), value],
-        keywords = []
-    )
+        case Await(value = value):
+            get_expr_defs(value, False, acc)
 
-def get_item(obj: expr, item: None | str | bytes | bool | int | float | complex) -> expr:
-    return Subscript(value = obj, slice = Constant(value = item), ctx = Load())
+        case Yield(value = value):
+            if value != None: get_expr_defs(value, False, acc)
 
-def set_item(obj: expr, item: None | str | bytes | bool | int | float | complex, value: expr) -> expr:
-    return Call(
-        func = get_attribute(obj, '__setitem__'),
-        args = [Constant(value = item), value],
-        keywords = []
-    )
+        case YieldFrom(value = value):
+            get_expr_defs(value, False, acc)
+                
+        case Compare(left = left, comparators = comparators):
+            get_expr_defs(left, False, acc)
+            get_exprs_defs(comparators, False, acc)
+            
+        case Call(func = func, args = args, keywords = keywords):
+            get_expr_defs(func, False, acc)
+            get_exprs_defs(args, False, acc)
+            for keyword in keywords: get_expr_defs(keyword.value, False, acc)
 
-def get_globals() -> expr:
-    return Call(
-        func = Name(id = 'globals', ctx = Load()),
-        args = [],
-        keywords = []
-    )
+        case FormattedValue(value = value, format_spec = format_spec):
+            get_expr_defs(value, False, acc)
+            if format_spec != None: get_expr_defs(format_spec, False, acc)
+        
+        case JoinedStr(values = values):
+            get_exprs_defs(values, False, acc)
+        
+        case Constant():
+            return
+        
+        case NamedExpr(target = target, value = value):
+            acc.add(target.id)
+            get_expr_defs(value, False, acc)
 
-def get_locals() -> expr:
-    return Call(
-        func = Name(id = 'locals', ctx = Load()),
-        args = [],
-        keywords = []
-    )
+        case Attribute(value = value):
+            get_expr_defs(value, False, acc)
+        
+        case Slice(lower = lower, upper = upper, step = step):
+            get_expr_defs(lower, False, acc)
+            get_expr_defs(upper, False, acc)
+            get_expr_defs(step, False, acc)
 
-def set_global_variable(id: str, value: expr) -> expr:
-    return set_item(get_globals(), id, value)
+        case Subscript(value = value, slice = slice):
+            get_expr_defs(value, False, acc)
+            get_expr_defs(slice, False, acc)
 
-def get_global_variable(id: str) -> expr:
-    return get_item(get_globals(), id)
+        case Starred(value = value):
+            get_expr_defs(value, False, acc)
 
-def get_scope(scope: str) -> expr:
-    return get_global_variable(scope)
+        case Name(id = id):
+            if in_assign: acc.add(id)
+        
+        case List(elts = elts):
+            get_exprs_defs(elts, in_assign, acc)
 
-def set_variable(id: str, value: expr, scope: str) -> expr:
-    return set_item(get_scope(scope), id, value)
+        case Tuple(elts = elts):
+            get_exprs_defs(elts, in_assign, acc)
 
-def get_variable(id: str, scope: str) -> expr:
-    return get_item(get_scope(scope), id)
+def get_exprs_defs(exprs: list[expr], in_assign: bool, acc: set[str]):
+    for expr in exprs: get_expr_defs(expr, in_assign, acc)
 
-# TODO: make scopes be a list during runtime as well for pushing/popping
-def add_scope(scopes: list[str], acc: list[expr]):
-    scope = get_new_temp()
-    scopes.append(scope)
-    acc.append(set_global_variable(scope, get_locals()))
+def get_stmt_defs(stmt: stmt, acc: set[str]):
+    match stmt:
+        case FunctionDef():
+            raise NotImplementedError('function definitions not yet implemented')
+        
+        case AsyncFunctionDef():
+            raise NotImplementedError('async function definitions not yet implemented')
+        
+        case ClassDef():
+            raise NotImplementedError('class definitions not yet implemented')
+        
+        case Return():
+            raise NotImplementedError('return not yet implemented')
+        
+        case Delete():
+            raise NotImplementedError('delete not yet implemented')
 
-def rem_scope(scopes: list[str], acc: list[expr]):
-    scopes.pop()
+        # Transforming any assignment statement
+        case Assign(targets = targets, value = value):
+            get_exprs_defs(targets, True, acc)
+            get_expr_defs(value, False, acc)
+        
+        case AugAssign():
+            raise NotImplementedError('augmented assign not yet implemented')
+        
+        case AnnAssign():
+            raise NotImplementedError('annotated assign not yet implemented')
+        
+        case For(target = target, iter = iter, body = body, orelse = orelse):
+            get_expr_defs(target, True, acc)
+            get_expr_defs(iter, False, acc)
+            get_stmts_defs(body, acc)
+            get_stmts_defs(orelse, acc)
 
-def wrap_exprs(exprs: list[expr]) -> expr:
-    num_exprs = len(exprs)
-    if num_exprs > 1:
-        res = Tuple(elts = exprs, ctx = Load())
-    elif num_exprs == 1:
-        res = exprs[0]
-    else:
-        res = Tuple(elts = [], ctx = Load())
+        case AsyncFor():
+            raise NotImplementedError('async for not yet implemented')
 
-    return res
+        case While(test = test, body = body, orelse = orelse):
+            get_expr_defs(test, False, acc)
+            get_stmts_defs(body, acc)
+            get_stmts_defs(orelse, acc)
+        
+        # Transforming if-elif-else statements
+        case If(test = test, body = body, orelse = orelse):
+            get_expr_defs(test, False, acc)
+            get_stmts_defs(body, acc)
+            get_stmts_defs(orelse, acc)
 
-while_temp = '-1'
-for_temp = '-2'
-def add_loops(acc: list[expr]):
-    base = Tuple(elts = [Name(id = 'object', ctx = Load())], ctx = Load())
-    attr_names = [Constant(value = 'stop'), Constant(value = '__init__'), Constant(value = '__iter__'), Constant(value = '__next__')]
-    stop = Name(id = 'StopIteration')
-    iter_body = parse('lambda self: self').body[0].value
+        case With():
+            raise NotImplementedError('with not yet implemented')
+        
+        case AsyncWith():
+            raise NotImplementedError('async with not yet implemented')
+        
+        case Raise():
+            raise NotImplementedError('raise not yet implemented')
+        
+        case Try():
+            raise NotImplementedError('try not yet implemented')
+        
+        case TryStar():
+            raise NotImplementedError('try* not yet implemented')
+        
+        case Assert():
+            raise NotImplementedError('assert not yet implemented')
+        
+        # Transforming basic imports with optional aliases
+        case Import(names = names):
+            for name in names:
+                if name.asname != None: acc.add(name.asname)
+                else: acc.add(name.name)
+        
+        # Transforming from imports with optional aliases
+        # TODO: implement *; this can happen after iteration is implemented
+        case ImportFrom(names = names):
+            for name in names:
+                if name.asname != None: acc.add(name.asname)
+                else: acc.add(name.name)
 
-    # while
-    while_init_body = parse('lambda self, guard, indicator, scope: (self.__setattr__("guard", guard), self.__setattr__("indicator", indicator), self.__setattr__("scope", scope), None)[-1]').body[0].value
-    while_next_body = parse('lambda self: ([] for [] in []).throw(self.stop) if self.scope[self.indicator] or not self.guard(self.scope) else self.scope').body[0].value
-    while_dict = Dict(
-        keys = attr_names,
-        values = [stop, while_init_body, iter_body, while_next_body]
-    )
-    while_type = Call(
-        func = Name(id = 'type'),
-        args = [Constant(value = while_temp), base, while_dict],
-        keywords = []
-    )
-    acc.append(while_type)
+        case Global():
+            raise NotImplementedError('global not yet implemented')
+        
+        case Nonlocal():
+            raise NotImplementedError('nonlocal not yet implemented')
 
-    # for
-    for_init_body = parse('lambda self, iterator, indicator, scope: (self.__setattr__("iterator", iterator.__iter__()), self.__setattr__("indicator", indicator), self.__setattr__("scope", scope), None)[-1]').body[0].value
-    for_next_body = parse('lambda self: ([] for [] in []).throw(self.stop) if self.scope[self.indicator] else (self.scope, self.iterator.__next__())').body[0].value
-    for_dict = Dict(
-        keys = attr_names,
-        values = [stop, for_init_body, iter_body, for_next_body]
-    )
-    for_type = Call(
-        func = Name(id = 'type'),
-        args = [Constant(value = for_temp), base, for_dict],
-        keywords = []
-    )
-    acc.append(for_type)
+        # Transforming expression statement (already one line)
+        case Expr(value = value):
+            get_expr_defs(value, False, acc)
+
+        case Pass():
+            return
+        
+        case Break():
+            return
+        
+        case Continue():
+            return
+
+def get_stmts_defs(stmts: list[stmt], acc: set[str]):
+    for stmt in stmts: get_stmt_defs(stmt, acc)
+
+# # TODO: to avoid having a crazy amount of temps, delete temps when not needed anymore
+#     # potentially use a list variable as a stack
+# temp_count = 0
+# def get_new_temp() -> str:
+#     global temp_count
+#     temp_count += 1
+#     return str(temp_count)
+
+# def get_attribute(obj: expr, attr: str) -> expr:
+#     return Attribute(value = obj, attr = attr, ctx = Load())
+
+# def set_attribute(obj: expr, attr: str, value: expr) -> expr:
+#     return Call(
+#         func = get_attribute(obj, '__setattr__'),
+#         args = [Constant(value = attr), value],
+#         keywords = []
+#     )
+
+# def get_item(obj: expr, item: None | str | bytes | bool | int | float | complex) -> expr:
+#     return Subscript(value = obj, slice = Constant(value = item), ctx = Load())
+
+# def set_item(obj: expr, item: None | str | bytes | bool | int | float | complex, value: expr) -> expr:
+#     return Call(
+#         func = get_attribute(obj, '__setitem__'),
+#         args = [Constant(value = item), value],
+#         keywords = []
+#     )
+
+# def get_globals() -> expr:
+#     return Call(
+#         func = Name(id = 'globals', ctx = Load()),
+#         args = [],
+#         keywords = []
+#     )
+
+# def get_locals() -> expr:
+#     return Call(
+#         func = Name(id = 'locals', ctx = Load()),
+#         args = [],
+#         keywords = []
+#     )
+
+# def set_global_variable(id: str, value: expr) -> expr:
+#     return set_item(get_globals(), id, value)
+
+# def get_global_variable(id: str) -> expr:
+#     return get_item(get_globals(), id)
+
+# def get_scope(scope: str) -> expr:
+#     return get_global_variable(scope)
+
+# def set_variable(id: str, value: expr, scope: str) -> expr:
+#     return set_item(get_scope(scope), id, value)
+
+# def get_variable(id: str, scope: str) -> expr:
+#     return get_item(get_scope(scope), id)
+
+# # TODO: make scopes be a list during runtime as well for pushing/popping
+# def add_scope(scopes: list[str], acc: list[expr]):
+#     scope = get_new_temp()
+#     scopes.append(scope)
+#     acc.append(set_global_variable(scope, get_locals()))
+
+# def rem_scope(scopes: list[str], acc: list[expr]):
+#     scopes.pop()
+
+# def wrap_exprs(exprs: list[expr]) -> expr:
+#     num_exprs = len(exprs)
+#     if num_exprs > 1:
+#         res = Tuple(elts = exprs, ctx = Load())
+#     elif num_exprs == 1:
+#         res = exprs[0]
+#     else:
+#         res = Tuple(elts = [], ctx = Load())
+
+#     return res
+
+# while_temp = '-1'
+# for_temp = '-2'
+# def add_loops(acc: list[expr]):
+#     base = Tuple(elts = [Name(id = 'object', ctx = Load())], ctx = Load())
+#     attr_names = [Constant(value = 'stop'), Constant(value = '__init__'), Constant(value = '__iter__'), Constant(value = '__next__')]
+#     stop = Name(id = 'StopIteration')
+#     iter_body = parse('lambda self: self').body[0].value
+
+#     # while
+#     while_init_body = parse('lambda self, guard, indicator, scope: (self.__setattr__("guard", guard), self.__setattr__("indicator", indicator), self.__setattr__("scope", scope), None)[-1]').body[0].value
+#     while_next_body = parse('lambda self: ([] for [] in []).throw(self.stop) if self.scope[self.indicator] or not self.guard(self.scope) else self.scope').body[0].value
+#     while_dict = Dict(
+#         keys = attr_names,
+#         values = [stop, while_init_body, iter_body, while_next_body]
+#     )
+#     while_type = Call(
+#         func = Name(id = 'type'),
+#         args = [Constant(value = while_temp), base, while_dict],
+#         keywords = []
+#     )
+#     acc.append(while_type)
+
+#     # for
+#     for_init_body = parse('lambda self, iterator, indicator, scope: (self.__setattr__("iterator", iterator.__iter__()), self.__setattr__("indicator", indicator), self.__setattr__("scope", scope), None)[-1]').body[0].value
+#     for_next_body = parse('lambda self: ([] for [] in []).throw(self.stop) if self.scope[self.indicator] else (self.scope, self.iterator.__next__())').body[0].value
+#     for_dict = Dict(
+#         keys = attr_names,
+#         values = [stop, for_init_body, iter_body, for_next_body]
+#     )
+#     for_type = Call(
+#         func = Name(id = 'type'),
+#         args = [Constant(value = for_temp), base, for_dict],
+#         keywords = []
+#     )
+#     acc.append(for_type)
 
 # def transform_expr(expr: expr | None, scopes: list[str]) -> expr | None:
 #     # Dict keys may be none in the case of a dictionary unpacking inside a literal
@@ -301,16 +510,23 @@ def transform_stmts(stmts: list[stmt], start: int, scopes: list[str], acc: list[
 
 def transform_module(module: Module) -> AST:
     acc = []
-    scopes = []
-    add_scope(scopes, acc)
-    add_loops(acc)
-    body = wrap_exprs(transform_stmts(module.body, 0, scopes, acc))
-    rem_scope(scopes, acc)
-    return Module(body = [Expr(value = body)], type_ignores = module.type_ignores)
+    get_stmts_defs(module, global_vars)
+    variables: dict[int, set[str]] = {0: global_vars}
+    scopes: list[int] = [0]
+    # scopes = init_global(module_init_vars)
+    # add_scope(scopes, acc)
+    # add_loops(acc)
+    # body = wrap_exprs(transform_stmts(module.body, 0, scopes, acc))
+    # rem_scope(scopes, acc)
+    # return Module(body = [Expr(value = body)], type_ignores = module.type_ignores)
 
 if __name__ == '__main__':
     file = read_file()
     ast = parse(file)
+    # res = set()
+    # get_stmts_defs(ast.body, res)
+    # print(res)
+
 
     print('print("Old ------------")')
     print(unparse(ast))
